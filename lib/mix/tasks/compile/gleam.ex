@@ -214,6 +214,7 @@ defmodule Mix.Tasks.Compile.Gleam do
         false
 
       _ ->
+        File.mkdir_p!("build/dev/erlang/#{app}")
         File.write!(cache_file, hash)
         true
     end
