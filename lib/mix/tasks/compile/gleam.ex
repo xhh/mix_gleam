@@ -127,7 +127,9 @@ defmodule Mix.Tasks.Compile.Gleam do
     files = MixGleam.find_files(search_paths) |> Enum.sort()
     total_files = Enum.count(files)
 
-    if need_to_compile?(type, files, app) do
+    {need_to_compile?, cache_hash} = calc_compile_cache(type, files, app)
+
+    if need_to_compile? do
       # if total_files > 0 do
       lib = Path.join(Mix.Project.build_path(), "lib")
       build = Path.join(lib, "#{app}")
@@ -143,7 +145,7 @@ defmodule Mix.Tasks.Compile.Gleam do
       # server).
       #
       package =
-        unless File.regular?("gleam.toml") do
+        if File.regular?("mix.exs") or not File.regular?("gleam.toml") do
           config = Path.join(build, "gleam.toml")
 
           unless File.regular?(config) do
@@ -175,6 +177,7 @@ defmodule Mix.Tasks.Compile.Gleam do
 
       MixGleam.IO.debug_info("Compiler Command", cmd)
       compiled? = @shell.cmd(cmd) === 0
+      # IO.puts("compile ok: #{compiled?}")
 
       if compiled? do
         # File.cp_r!(out, Mix.Project.app_path())
@@ -190,6 +193,11 @@ defmodule Mix.Tasks.Compile.Gleam do
         # if not tests? and Mix.env() in [:dev, :test] do
         # compile_package(app, true)
         # end
+
+        if cache_hash do
+          File.mkdir_p!("build/dev/erlang/#{app}")
+          File.write!(cache_file(app), cache_hash)
+        end
       else
         raise MixGleam.Error, message: "Compilation failed"
       end
@@ -198,27 +206,23 @@ defmodule Mix.Tasks.Compile.Gleam do
     :ok
   end
 
-  defp need_to_compile?(:dep, _files, _app), do: true
-  defp need_to_compile?(_type, [], _app), do: false
+  defp calc_compile_cache(:dep, _files, _app), do: {true, nil}
+  defp calc_compile_cache(_type, [], _app), do: {false, nil}
 
-  defp need_to_compile?(_type, files, app) do
+  defp calc_compile_cache(_type, files, app) do
     hash =
       for file <- files, into: "" do
         file <> " " <> (file_sha256(file) || "") <> "\n"
       end
 
-    cache_file = "build/dev/erlang/#{app}/.compile_cache"
 
-    case File.read(cache_file) do
-      {:ok, ^hash} ->
-        false
-
-      _ ->
-        File.mkdir_p!("build/dev/erlang/#{app}")
-        File.write!(cache_file, hash)
-        true
+    case File.read(cache_file(app)) do
+      {:ok, ^hash} -> {false, hash}
+      _ -> {true, hash}
     end
   end
+
+  defp cache_file(app), do: "build/dev/erlang/#{app}/.compile_cache"
 
   defp file_sha256(file_path) do
     if File.regular?(file_path) do
